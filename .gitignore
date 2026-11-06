@@ -1,0 +1,9 @@
+.DS_Store
+.build/
+build/
+module-cache/
+/CodexCenterNotify
+/codex-center-notify
+*.backup
+config.toml
+config.toml.codex-center-notify.*
