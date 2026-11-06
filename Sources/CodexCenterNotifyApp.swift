@@ -97,20 +97,49 @@ private func antigravityScreen() -> NSScreen? {
     }
 }
 
+private final class HoverTrackingView: NSView {
+    var onHoverChanged: ((Bool) -> Void)?
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        let trackingArea = NSTrackingArea(rect: .zero,
+                                          options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                          owner: self,
+                                          userInfo: nil)
+        addTrackingArea(trackingArea)
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChanged?(false)
+    }
+}
+
 private final class NotificationController: NSObject, NSApplicationDelegate {
     private let event: CompletionEvent?
     private let lockDescriptor: Int32
     private let testLogPath: String?
     private let duration: TimeInterval
+    private let hoverInteractionsEnabled: Bool
     private var panel: NSPanel?
+    private var closeButton: NSButton?
+    private var closeTimer: DispatchWorkItem?
+    private var isHovered = false
+    private var didFinish = false
     private var startedAt = Date()
     private var initialFrontPID: pid_t = 0
 
-    init(event: CompletionEvent?, lockDescriptor: Int32, testLogPath: String?, duration: TimeInterval) {
+    init(event: CompletionEvent?, lockDescriptor: Int32, testLogPath: String?, duration: TimeInterval,
+         hoverInteractionsEnabled: Bool) {
         self.event = event
         self.lockDescriptor = lockDescriptor
         self.testLogPath = testLogPath
         self.duration = duration
+        self.hoverInteractionsEnabled = hoverInteractionsEnabled
         super.init()
     }
 
@@ -137,15 +166,38 @@ private final class NotificationController: NSObject, NSApplicationDelegate {
         panel.hasShadow = true
         panel.level = .floating
         panel.hidesOnDeactivate = false
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = false
+        panel.acceptsMouseMovedEvents = true
+        panel.becomesKeyOnlyIfNeeded = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
-        let card = NSView(frame: NSRect(origin: .zero, size: size))
+        let card = HoverTrackingView(frame: NSRect(origin: .zero, size: size))
         card.wantsLayer = true
         card.layer?.backgroundColor = NSColor(calibratedRed: 0.105, green: 0.112, blue: 0.13, alpha: 0.97).cgColor
         card.layer?.cornerRadius = 18
         card.layer?.borderWidth = 1
         card.layer?.borderColor = NSColor.white.withAlphaComponent(0.09).cgColor
+
+        let closeButton = NSButton(frame: .zero)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "关闭通知")
+        closeButton.imagePosition = .imageOnly
+        closeButton.imageScaling = .scaleProportionallyDown
+        closeButton.isBordered = false
+        closeButton.focusRingType = .none
+        closeButton.contentTintColor = NSColor(calibratedWhite: 0.82, alpha: 1)
+        closeButton.toolTip = "关闭通知"
+        closeButton.wantsLayer = true
+        closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        closeButton.layer?.cornerRadius = 12
+        closeButton.isHidden = true
+        closeButton.target = self
+        closeButton.action = #selector(closeNotification)
+        self.closeButton = closeButton
+        card.onHoverChanged = { [weak self] isHovered in
+            guard let self, self.hoverInteractionsEnabled else { return }
+            self.setHoverState(isHovered)
+        }
 
         let source = NSTextField(labelWithString: notificationSourceText)
         source.font = .systemFont(ofSize: 11, weight: .medium)
@@ -165,6 +217,7 @@ private final class NotificationController: NSObject, NSApplicationDelegate {
         stack.spacing = hasSummary ? 6 : 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(stack)
+        card.addSubview(closeButton, positioned: .above, relativeTo: nil)
 
         if let project = event?.project {
             let detail = NSTextField(labelWithString: "项目 · \(project)")
@@ -189,7 +242,11 @@ private final class NotificationController: NSObject, NSApplicationDelegate {
             stack.centerXAnchor.constraint(equalTo: card.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: card.centerYAnchor),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: card.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -24)
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -24),
+            closeButton.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            closeButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            closeButton.widthAnchor.constraint(equalToConstant: 24),
+            closeButton.heightAnchor.constraint(equalToConstant: 24)
         ])
 
         panel.contentView = card
@@ -212,9 +269,39 @@ private final class NotificationController: NSObject, NSApplicationDelegate {
             writeTestLine("TEST_SOUND Glass started=\(soundStarted ? 1 : 0)", to: testLogPath)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-            self?.finish()
+        scheduleAutoClose()
+    }
+
+    private func setHoverState(_ hovered: Bool) {
+        guard !didFinish else { return }
+        isHovered = hovered
+        closeTimer?.cancel()
+        closeTimer = nil
+        closeButton?.isHidden = !hovered
+        if let testLogPath {
+            writeTestLine("TEST_HOVER inside=\(hovered) close_visible=\(closeButton?.isHidden == false) image=\(closeButton?.image != nil)", to: testLogPath)
         }
+        if !hovered {
+            scheduleAutoClose()
+        }
+    }
+
+    private func scheduleAutoClose() {
+        closeTimer?.cancel()
+        guard !didFinish, !isHovered else { return }
+        let timer = DispatchWorkItem { [weak self] in
+            guard let self, !self.isHovered else { return }
+            self.finish()
+        }
+        closeTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: timer)
+    }
+
+    @objc private func closeNotification() {
+        if let testLogPath {
+            writeTestLine("TEST_CLOSE_ACTION clicked=true", to: testLogPath)
+        }
+        finish()
     }
 
     private func playGlass() -> Bool {
@@ -237,6 +324,10 @@ private final class NotificationController: NSObject, NSApplicationDelegate {
     }
 
     private func finish() {
+        guard !didFinish else { return }
+        didFinish = true
+        closeTimer?.cancel()
+        closeTimer = nil
         panel?.orderOut(nil)
         panel?.close()
         if let testLogPath {
@@ -265,6 +356,7 @@ private let app = NSApplication.shared
 private let controller = NotificationController(event: event,
                                                 lockDescriptor: lockDescriptor,
                                                 testLogPath: testLogPath,
-                                                duration: visualTest ? visualTestDuration : notificationDuration)
+                                                duration: visualTest ? visualTestDuration : notificationDuration,
+                                                hoverInteractionsEnabled: !testMode || visualTest)
 app.delegate = controller
 app.run()
