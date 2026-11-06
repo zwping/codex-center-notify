@@ -189,7 +189,9 @@ private final class NotificationController: NSObject, NSApplicationDelegate {
         closeButton.toolTip = "关闭通知"
         closeButton.wantsLayer = true
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
-        closeButton.layer?.cornerRadius = 12
+        closeButton.layer?.cornerRadius = 14
+        closeButton.layer?.cornerCurve = .circular
+        closeButton.layer?.masksToBounds = true
         closeButton.isHidden = true
         closeButton.target = self
         closeButton.action = #selector(closeNotification)
@@ -245,8 +247,8 @@ private final class NotificationController: NSObject, NSApplicationDelegate {
             stack.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -24),
             closeButton.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
             closeButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-            closeButton.widthAnchor.constraint(equalToConstant: 24),
-            closeButton.heightAnchor.constraint(equalToConstant: 24)
+            closeButton.widthAnchor.constraint(equalToConstant: 28),
+            closeButton.heightAnchor.constraint(equalToConstant: 28)
         ])
 
         panel.contentView = card
