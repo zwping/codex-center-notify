@@ -284,7 +284,7 @@ private final class NotificationController: NSObject, NSApplicationDelegate {
             writeTestLine("TEST_HOVER inside=\(hovered) close_visible=\(closeButton?.isHidden == false) image=\(closeButton?.image != nil)", to: testLogPath)
         }
         if !hovered {
-            scheduleAutoClose()
+            finish()
         }
     }
 
