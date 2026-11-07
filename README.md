@@ -13,6 +13,19 @@ macOS 原生 Swift/AppKit 悬浮通知：Antigravity 中的 Codex 完成任务�
 - 仅当启动器进程祖先路径包含 Antigravity Plugin Helper 时显示；这是尽力过滤，需在目标扩展版本上实测。
 - 不使用第三方依赖，不运行常驻服务。摘要只在本机屏幕显示。
 
+## 工作原理
+
+核心触发事件是 Codex `notify` 回调收到的 `type = agent-turn-complete`，表示一个 Agent turn 已完成。启动器只在调用进程来自 Antigravity 扩展时继续处理；通知程序从事件的 `cwd` 和 `last-assistant-message` 读取项目名与回复内容。
+
+```mermaid
+flowchart LR
+    A["Codex Agent turn 完成"] --> B["notify 回调收到完成事件"]
+    B --> C{"type = agent-turn-complete<br/>且调用来自 Antigravity 扩展？"}
+    C -- 否 --> D["启动器退出，不显示通知"]
+    C -- 是 --> E["读取 cwd 和 last-assistant-message"]
+    E --> F["显示 Codex 完成通知"]
+```
+
 ## 界面截图
 
 <table>
